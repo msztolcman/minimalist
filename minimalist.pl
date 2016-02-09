@@ -42,7 +42,7 @@ require MIME::Base64;
 require Sys::Hostname;
 require POSIX;
 
-    $ENV{SMTPHOST} = '127.0.0.1';
+$ENV{SMTPHOST} = '127.0.0.1';
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV)};
 $ENV{'PATH'} = '/bin:/usr/bin';
 
@@ -135,6 +135,7 @@ my %global_conf = (
   sendmail => undef,
   status => $OPEN,
   strip_rrq => 'no',
+  strip_dkim => 'no',
   to_recipient => 'no',
   xtrahdr => ''
 );
@@ -344,13 +345,14 @@ if (defined $ARGV[0] && $ARGV[0] eq '-') {
 		"Delay between deliveries: ".($lconf{delay} ? $lconf{delay} : "none")."\n".
 		"Maximal size of message: ".($lconf{maxsize} ? "$lconf{maxsize} bytes" : "unlimited")."\n".
 		"Strip 'Return Receipt' requests: $lconf{strip_rrq}\n".
+		"Strip DKIM headers: $lconf{strip_dkim}\n".
 		"List information: ".($lconf{listinfo} eq 'no' ? "no" : "yes".
 				($lconf{listinfo} ne 'yes' ? ", archive at: $lconf{listinfo}" : ""))."\n".
 	"Charset: $lconf{charset}\n".
 	"Language: $lconf{language}\n".
 	"Fill To: with recipient's address: $lconf{to_recipient}\n".
 	"Extra Header(s):".($lconf{xtrahdr} ? "\n\n$lconf{xtrahdr}" : " none")."\n\n";
-    
+
     # Various checks
     $msg .= " * $lconf{directory} doesn't exist!\n" if (! -d $lconf{directory});
     $msg .= " * Invalid 'log messages' value '$lconf{logmessages}'\n" if ($lconf{logmessages} !~ /^yes$|^no$/i);
@@ -365,6 +367,7 @@ if (defined $ARGV[0] && $ARGV[0] eq '-') {
     $msg .= " * Invalid authentication request validity time: $lconf{auth_valid}\n" if ($lconf{auth_valid} !~ /^[0-9]+$/);
     $msg .= " * Invalid archiving strategy '$lconf{archive}'\n" if ($lconf{archive} !~ /^no$|^daily$|^monthly$|^yearly$|^pipe$/i);
     $msg .= " * Invalid 'strip rrq' value '$lconf{strip_rrq}'\n" if ($lconf{strip_rrq} !~ /^yes$|^no$/i);
+    $msg .= " * Invalid 'strip DKIM' value '$lconf{strip_dkim}'\n" if ($lconf{strip_dkim} !~ /^yes$|^no$/i);
     $msg .= " * Invalid 'remove resent' value '$lconf{remove_resent}'\n" if ($lconf{remove_resent} !~ /^yes$|^no$/i);
     my $translation = "$lconf{translationpath}/$lconf{language}";
     $msg .= " * Invalid 'to recipient' value '$lconf{to_recipient}'\n" if ($lconf{to_recipient} !~ /^yes$|^no$/i);
@@ -645,7 +648,7 @@ _EOF_
 	'===========================================================================';
 
       send_message("Subject: $subject", $body, $mailto)
-    } 
+    }
 
   # If list or sender in read-only mode and sender isn't admin and not
   # in allowed writers
@@ -753,6 +756,11 @@ _EOF_
       $header =~ s/x-confirm-reading-to:\s+.*\n//ig;
     }
 
+    if ($conf{strip_dkim} eq 'yes') {		# DKIM headers
+      $header =~ s/x-google-dkim-signature:\s+.*\n([ \t]+.*\n)*//ig;
+      $header =~ s/dkim-signature:\s+.*\n([ \t]+.*\n)*//ig;
+    }
+
     if ($conf{modify_msgid} eq 'yes') {	# Change Message-ID in outgoing message
       $header =~ s/message-id:\s+(.*)\n//i;
       my $old_msgid = $1; $old_msgid =~ s/$first/$3/g;
@@ -846,7 +854,7 @@ _EOF_
 	  # Move Content-* fields to MIME entity
 	  my @ctypeh;
 	  while ($header =~ s/(^|\n)(Content-[\w\-]+:[ \t]+(.*\n([ \t]+.*\n)*))/$1/i) {
-	    push (@ctypeh, $2) 
+	    push (@ctypeh, $2)
 	  }
 	  my $boundary = "MML_".time()."_$$\@".int(rand(10000)).".$conf{domain}";
 	  $header .= "MIME-Version: 1.0\n" if ($header !~ /(^|\n)MIME-Version:/);
@@ -923,7 +931,7 @@ _EOF_
 		$pos++; $level--;
 	      }
 	      # else seems to be boundary error, but do nothing
-	    }	 
+	    }
 	  }
 	}	# while THROUGH_LEVELS
 
@@ -1221,7 +1229,7 @@ else {
       when ('subscribe') {
 	my $email = shift @cmd;
 	$email = $1 if (defined $email && $email =~/^($addr)/);
-	
+
 	if (verify($from, $password)) {
 	  $msg .= subscribe($list, $from, $email);
 	  logCommand($from, $line);
@@ -1251,7 +1259,7 @@ else {
       when ('unsubscribe') {
 	my $email = shift @cmd;
 	$email = $1 if (defined $email && $email =~/^($addr)/);
-	
+
 	if (verify($from, $password)) {
 	  $msg .= unsubscribe($list, $from, $email);
 	  logCommand($from, $line);
@@ -1563,7 +1571,7 @@ sub genAdminReport ($$$) {
   'Subject: '. mt('Error processing'). "\n".
   'Precedence: High';
 
-  my $body = 
+  my $body =
   mt('ERROR:'). "\n".
   mt("Minimalist was unable to process '[_1]' request on [_2] for [_3].",
     $rqtype, $list, $email).
@@ -1603,7 +1611,7 @@ sub txtUserSet {
   return $usrmsg;
 }
 
-# Changes specified user settings, preserves other 
+# Changes specified user settings, preserves other
 sub chgUserSet ($$;$) {
 
  my ($curSet, $pattern, $value) = @_;
@@ -1821,12 +1829,13 @@ sub read_config ($$) {
 	    $nconf{listinfo} = 'no' if ($scope eq 'global' && $nconf{listinfo} ne 'yes');
 	  }
 	  when ('strip rrq') { $nconf{strip_rrq} = lc($value); }
+	  when ('strip dkim') { $nconf{strip_dkim} = lc($value); }
 	  when ('modify message-id') { $nconf{modify_msgid} = lc($value); }
 	  when ('remove resent') { $nconf{remove_resent} = lc($value); }
 	  when ('extra header') { $nconf{xtrahdr} .= $value . "\n"; }
 	  when ('cc on subscribe') { $nconf{cc_on_subscribe} = lc($value); }
 	  when ('charset') { $nconf{charset} = lc($value); }
-	  default { 
+	  default {
 	    warn "Unknown key \"$_\" or not allowed in $scope config scope";
 	  }
 	}
@@ -2061,7 +2070,7 @@ sub Invert {
 
 sub load_language () {
   require "translations/$conf{language}.pm" unless($conf{language} eq 'en');
-  
+
   $maketext =
   "Translation::$conf{language}"->new($conf{language}) || die "Language?";
 }

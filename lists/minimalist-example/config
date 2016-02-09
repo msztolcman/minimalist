@@ -216,6 +216,15 @@ security = paranoid
 #
 #strip rrq = yes
 
+# Strip various headers related to DKIM. Currently there are:
+#
+#  . X-Google-DKIM-Signature
+#  . DKIM-Signature
+#
+# Default not to strip
+#
+#strip dkim = yes
+
 # Add extra headers. It is possible to use this option two and more times -
 # Minimalist will glue all these headers, when producing final message.
 # Also it is possible to use macroses (if applicable) \a (admin), \d
